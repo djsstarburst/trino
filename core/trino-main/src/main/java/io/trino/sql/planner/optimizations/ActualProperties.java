@@ -393,7 +393,7 @@ public class ActualProperties
         private boolean isSingleNode()
         {
             if (nodePartitioning.isEmpty()) {
-                return false;
+                return true;
             }
 
             return nodePartitioning.get().getHandle().isSingleNode();

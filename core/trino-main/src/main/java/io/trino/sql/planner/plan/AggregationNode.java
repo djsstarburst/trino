@@ -15,6 +15,7 @@ package io.trino.sql.planner.plan;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -477,5 +478,16 @@ public class AggregationNode
                     expectedArgumentCount,
                     arguments.size());
         }
+
+        @Override
+        public String toString()
+        {
+            return MoreObjects.toStringHelper(this)
+                    .add("resolvedFunction", resolvedFunction.getSignature().getName())
+                    .add("arguments", arguments)
+                    .toString();
+        }
     }
+
+
 }
