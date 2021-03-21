@@ -326,4 +326,18 @@ public interface Block
     {
         return Collections.emptyList();
     }
+
+    default boolean allPositionsAreNull()
+    {
+        if (!mayHaveNull()) {
+            return false;
+        }
+        int positionCount = getPositionCount();
+        for (int position = 0; position < positionCount; position++) {
+            if (!isNull(position)) {
+                return false;
+            }
+        }
+        return true;
+    }
 }

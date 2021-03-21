@@ -219,6 +219,7 @@ public class Analysis
     private Optional<QualifiedObjectName> delegatedRefreshMaterializedView = Optional.empty();
     private Optional<TableHandle> analyzeTarget = Optional.empty();
     private Optional<List<ColumnSchema>> updatedColumns = Optional.empty();
+    private Optional<MergeAnalysis> mergeAnalysis = Optional.empty();
 
     private final QueryType queryType;
 
@@ -766,6 +767,16 @@ public class Analysis
     public Optional<List<ColumnSchema>> getUpdatedColumns()
     {
         return updatedColumns;
+    }
+
+    public Optional<MergeAnalysis> getMergeAnalysis()
+    {
+        return mergeAnalysis;
+    }
+
+    public void setMergeAnalysis(MergeAnalysis mergeAnalysis)
+    {
+        this.mergeAnalysis = Optional.of(mergeAnalysis);
     }
 
     public void setRefreshMaterializedView(RefreshMaterializedViewAnalysis refreshMaterializedView)
@@ -1621,6 +1632,94 @@ public class Analysis
         public boolean isFrameInherited()
         {
             return frameInherited;
+        }
+    }
+
+    public static class MergeAnalysis
+    {
+        private final Table targetTable;
+        private final List<ColumnSchema> dataColumnSchemas;
+        private final List<ColumnHandle> dataColumnHandles;
+        private final List<ColumnHandle> redistributionColumnHandles;
+        private final List<List<ColumnHandle>> mergeCaseColumnHandles;
+        private final Map<ColumnHandle, Integer> columnHandleFieldNumbers;
+        private final List<Integer> partitionFunctionArgumentIndexes;
+        private final Optional<TableLayout> newTableLayout;
+        private final Scope targetTableScope;
+        private final Scope joinScope;
+
+        public MergeAnalysis(
+                Table targetTable,
+                List<ColumnSchema> dataColumnSchemas,
+                List<ColumnHandle> dataColumnHandles,
+                List<ColumnHandle> redistributionColumnHandles,
+                List<List<ColumnHandle>> mergeCaseColumnHandles,
+                Map<ColumnHandle, Integer> columnHandleFieldNumbers,
+                List<Integer> partitionFunctionArgumentIndexes,
+                Optional<TableLayout> newTableLayout,
+                Scope targetTableScope,
+                Scope joinScope)
+        {
+            this.targetTable = requireNonNull(targetTable, "targetTable is null");
+            this.dataColumnSchemas = requireNonNull(dataColumnSchemas, "dataColumnSchemas is null");
+            this.dataColumnHandles = requireNonNull(dataColumnHandles, "dataColumnHandles is null");
+            this.redistributionColumnHandles = requireNonNull(redistributionColumnHandles, "redistributionColumnHandles is null");
+            this.mergeCaseColumnHandles = requireNonNull(mergeCaseColumnHandles, "mergeCaseColumnHandles is null");
+            this.columnHandleFieldNumbers = requireNonNull(columnHandleFieldNumbers, "columnHandleFieldNumbers is null");
+            this.newTableLayout = requireNonNull(newTableLayout, "newTableLayout is null");
+            this.partitionFunctionArgumentIndexes = (requireNonNull(partitionFunctionArgumentIndexes, "partitionFunctionArgumentIndexes is null"));
+            this.targetTableScope = requireNonNull(targetTableScope, "targetTableScope is null");
+            this.joinScope = requireNonNull(joinScope, "joinScope is null");
+        }
+
+        public Table getTargetTable()
+        {
+            return targetTable;
+        }
+
+        public List<ColumnSchema> getDataColumnSchemas()
+        {
+            return dataColumnSchemas;
+        }
+
+        public List<ColumnHandle> getDataColumnHandles()
+        {
+            return dataColumnHandles;
+        }
+
+        public List<ColumnHandle> getRedistributionColumnHandles()
+        {
+            return redistributionColumnHandles;
+        }
+
+        public List<List<ColumnHandle>> getMergeCaseColumnHandles()
+        {
+            return mergeCaseColumnHandles;
+        }
+
+        public Map<ColumnHandle, Integer> getColumnHandleFieldNumbers()
+        {
+            return columnHandleFieldNumbers;
+        }
+
+        public List<Integer> getPartitionFunctionArgumentIndexes()
+        {
+            return partitionFunctionArgumentIndexes;
+        }
+
+        public Optional<TableLayout> getNewTableLayout()
+        {
+            return newTableLayout;
+        }
+
+        public Scope getJoinScope()
+        {
+            return joinScope;
+        }
+
+        public Scope getTargetTableScope()
+        {
+            return targetTableScope;
         }
     }
 
