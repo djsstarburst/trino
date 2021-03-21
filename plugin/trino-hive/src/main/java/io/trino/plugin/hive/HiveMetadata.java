@@ -3660,7 +3660,7 @@ public class HiveMetadata
     @Override
     public boolean supportsReportingWrittenBytes(ConnectorSession session, ConnectorTableHandle connectorTableHandle)
     {
-        return true;
+        throw new UnsupportedOperationException();
     }
 
     @Override
