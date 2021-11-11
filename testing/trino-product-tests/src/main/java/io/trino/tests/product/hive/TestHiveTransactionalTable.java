@@ -37,6 +37,7 @@ import java.io.ByteArrayOutputStream;
 import java.sql.Date;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -2482,6 +2483,33 @@ public class TestHiveTransactionalTable
 
             log.info("Verifying MERGE");
             verifySelectForTrinoAndHive("SELECT name  FROM " + targetTable, "name LIKE('EU%')", row("EUROPEAN"));
+        });
+    }
+
+    @Test(groups = HIVE_TRANSACTIONAL, timeOut = TEST_TIMEOUT)
+    public void testMergeOverManySplits()
+    {
+        withTemporaryTable("delete_select", true, false, NONE, targetTable -> {
+            onTrino().executeQuery(format("CREATE TABLE %s WITH (transactional = true) AS SELECT * FROM tpch.sf1.orders", targetTable));
+
+            String sql = format("MERGE INTO %s t USING (SELECT * FROM tpch.sf1.orders) s ON (t.orderkey = s.orderkey)", targetTable) +
+                    " WHEN MATCHED AND mod(s.orderkey, 3) = 0 THEN UPDATE SET totalprice = t.totalprice + s.totalprice" +
+                    " WHEN MATCHED AND mod(s.orderkey, 3) = 1 THEN DELETE";
+
+            log.info("Explain plan\n%s\n%s", sql, onTrino().executeQuery("EXPLAIN " + sql).row(0).get(0));
+
+            log.info("About to merge selected rows");
+            onTrino().executeQuery(sql);
+
+            QueryResult result = onTrino().executeQuery(format("SELECT orderkey FROM %s t WHERE mod(t.orderkey, 3) = 1", targetTable));
+            List<Long> orderkeys = new ArrayList<>();
+            for (int row = 0; row < result.getRowsCount(); row++) {
+                orderkeys.add((long) result.row(row).get(0));
+            }
+            Collections.sort(orderkeys);
+            log.info("orderKeys that should be gone %s", orderkeys.stream().map(String::valueOf).collect(Collectors.joining(", ")));
+
+            verifySelectForTrinoAndHive(format("SELECT count(*) FROM %s t", targetTable), "mod(t.orderkey, 3) = 1", row(0));
         });
     }
 
