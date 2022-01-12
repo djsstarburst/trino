@@ -15,11 +15,13 @@ package io.trino.operator;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.google.common.collect.ImmutableList;
+import io.airlift.log.Logger;
 import io.trino.spi.Page;
 import io.trino.spi.PageBuilder;
 import io.trino.spi.block.Block;
 import io.trino.spi.block.BlockBuilder;
 import io.trino.spi.block.DictionaryBlock;
+import io.trino.spi.block.PageDescriptionUtils;
 import io.trino.spi.block.RowBlock;
 import io.trino.spi.block.RunLengthEncodedBlock;
 import io.trino.spi.connector.ConnectorMergeSink;
@@ -44,6 +46,8 @@ import static java.util.Objects.requireNonNull;
 public class DeleteAndInsertMergeProcessor
         implements MergeRowChangeProcessor
 {
+    private static final Logger log = Logger.get(DeleteAndInsertMergeProcessor.class);
+
     private final List<Type> dataColumnTypes;
     private final Type rowIdType;
     private final int rowIdChannel;
@@ -119,6 +123,7 @@ public class DeleteAndInsertMergeProcessor
     public Page transformPage(Page inputPage)
     {
         requireNonNull(inputPage, "inputPage is null");
+        log.info("transformPage input %s", PageDescriptionUtils.describePage(inputPage));
         int inputChannelCount = inputPage.getChannelCount();
         if (inputChannelCount < 2 + redistributionColumnCount) {
             throw new IllegalArgumentException(format("inputPage channelCount (%s) should be >= 2 + partition columns size (%s)", inputChannelCount, redistributionColumnCount));
@@ -196,7 +201,9 @@ public class DeleteAndInsertMergeProcessor
         }
         blocksWithRowId[pageChannels] = makeOutputRowIdBlock(rowIdBlock, rowIdPositions);
 
-        return new Page(blocksWithRowId);
+        Page page = new Page(blocksWithRowId);
+        log.info("transformPage output %s", PageDescriptionUtils.describePage(page));
+        return page;
     }
 
     private Block makeOutputRowIdBlock(Block rowIdBlock, int[] rowIdPositions)

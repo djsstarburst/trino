@@ -14,12 +14,14 @@
 package io.trino.plugin.hive;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.airlift.log.Logger;
 import io.trino.plugin.hive.HiveWriterFactory.RowIdSortingFileWriterMaker;
 import io.trino.plugin.hive.acid.AcidOperation;
 import io.trino.plugin.hive.acid.AcidTransaction;
 import io.trino.plugin.hive.orc.OrcFileWriterFactory;
 import io.trino.spi.Page;
 import io.trino.spi.block.Block;
+import io.trino.spi.block.PageDescriptionUtils;
 import io.trino.spi.block.RowBlock;
 import io.trino.spi.block.RunLengthEncodedBlock;
 import io.trino.spi.connector.ConnectorSession;
@@ -41,6 +43,8 @@ public class MergeFileWriter
         extends AbstractHiveAcidWriters
         implements FileWriter
 {
+    private static final Logger log = Logger.get(MergeFileWriter.class);
+
     private final String partitionName;
     private final List<HiveColumnHandle> inputColumns;
 
@@ -84,15 +88,18 @@ public class MergeFileWriter
             return;
         }
 
+        log.info("appendRows input %s", PageDescriptionUtils.describePage(page));
         MergePage mergePage = createDeleteAndInsertPages(page, inputColumns.size());
         mergePage.getDeletionsPage().ifPresent(deletePage -> {
             Block acidBlock = deletePage.getBlock(deletePage.getChannelCount() - 1);
             Page orcDeletePage = buildDeletePage(acidBlock, transaction.getWriteId());
+            log.info("appendRows deletePage %s", PageDescriptionUtils.describePage(orcDeletePage));
             getOrCreateDeleteFileWriter().appendRows(orcDeletePage);
             deleteRowCount += deletePage.getPositionCount();
         });
         mergePage.getInsertionsPage().ifPresent(insertPage -> {
             Page orcInsertPage = buildInsertPage(insertPage, transaction.getWriteId(), inputColumns, bucketValueBlock, insertRowCount);
+            log.info("appendRows insertPage %s", PageDescriptionUtils.describePage(orcInsertPage));
             insertRowCount += insertPage.getPositionCount();
             getOrCreateInsertFileWriter().appendRows(orcInsertPage);
             insertRowCount += insertPage.getPositionCount();

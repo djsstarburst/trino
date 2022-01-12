@@ -2490,27 +2490,36 @@ public class TestHiveTransactionalTable
     public void testMergeOverManySplits()
     {
         withTemporaryTable("delete_select", true, false, NONE, targetTable -> {
-            onTrino().executeQuery(format("CREATE TABLE %s WITH (transactional = true) AS SELECT * FROM tpch.sf1.orders", targetTable));
+            onTrino().executeQuery(format("CREATE TABLE %s (orderkey bigint, custkey bigint, orderstatus varchar(1), totalprice double, orderdate date, orderpriority varchar(15), clerk varchar(15), shippriority integer, comment varchar(79)) WITH (transactional = true)", targetTable));
 
-            String sql = format("MERGE INTO %s t USING (SELECT * FROM tpch.sf1.orders) s ON (t.orderkey = s.orderkey)", targetTable) +
+            onTrino().executeQuery(format("INSERT INTO %s SELECT * FROM tpch.\"sf0.1\".orders", targetTable));
+
+            String sql = format("MERGE INTO %s t USING (SELECT * FROM tpch.\"sf0.1\".orders) s ON (t.orderkey = s.orderkey)", targetTable) +
                     " WHEN MATCHED AND mod(s.orderkey, 3) = 0 THEN UPDATE SET totalprice = t.totalprice + s.totalprice" +
                     " WHEN MATCHED AND mod(s.orderkey, 3) = 1 THEN DELETE";
+
+            log.info("SQL for merge is: %s", sql);
 
             log.info("Explain plan\n%s\n%s", sql, onTrino().executeQuery("EXPLAIN " + sql).row(0).get(0));
 
             log.info("About to merge selected rows");
             onTrino().executeQuery(sql);
 
-            QueryResult result = onTrino().executeQuery(format("SELECT orderkey FROM %s t WHERE mod(t.orderkey, 3) = 1", targetTable));
-            List<Long> orderkeys = new ArrayList<>();
-            for (int row = 0; row < result.getRowsCount(); row++) {
-                orderkeys.add((long) result.row(row).get(0));
-            }
-            Collections.sort(orderkeys);
-            log.info("orderKeys that should be gone %s", orderkeys.stream().map(String::valueOf).collect(Collectors.joining(", ")));
+            log.info("On Trino, orderkeys that should be gone %s", extractMissingDeletes(onTrino().executeQuery(format("SELECT orderkey FROM %s t WHERE mod(t.orderkey, 3) = 1", targetTable))));
+            log.info("On Hive,  orderkeys that should be gone %s", extractMissingDeletes(onHive().executeQuery(format("SELECT orderkey FROM %s t WHERE mod(t.orderkey, 3) = 1", targetTable))));
 
             verifySelectForTrinoAndHive(format("SELECT count(*) FROM %s t", targetTable), "mod(t.orderkey, 3) = 1", row(0));
         });
+    }
+
+    private List<Long> extractMissingDeletes(QueryResult result)
+    {
+        List<Long> orderkeys = new ArrayList<>();
+        for (int row = 0; row < result.getRowsCount(); row++) {
+            orderkeys.add((long) result.row(row).get(0));
+        }
+        Collections.sort(orderkeys);
+        return orderkeys;
     }
 
     @DataProvider

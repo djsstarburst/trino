@@ -16,6 +16,7 @@ package io.trino.plugin.hive.orc;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
+import io.airlift.log.Logger;
 import io.airlift.slice.Slice;
 import io.trino.memory.context.AggregatedMemoryContext;
 import io.trino.orc.NameBasedFieldMapper;
@@ -120,6 +121,7 @@ import static org.apache.hadoop.hive.ql.io.AcidUtils.isFullAcidTable;
 public class OrcPageSourceFactory
         implements HivePageSourceFactory
 {
+    private static final Logger log = Logger.get(OrcPageSourceFactory.class);
     private static final Pattern DEFAULT_HIVE_COLUMN_NAME_PATTERN = Pattern.compile("_col\\d+");
     private final OrcReaderOptions orcReaderOptions;
     private final HdfsEnvironment hdfsEnvironment;
@@ -445,9 +447,11 @@ public class OrcPageSourceFactory
                 if (originalFile) {
                     int bucket = bucketNumber.orElse(0);
                     long startingRowId = originalFileRowId.orElse(0L);
+                    log.info("Adding originalFiles adaptation with startingRowId %s", startingRowId);
                     columnAdaptations.add(OrcPageSource.ColumnAdaptation.mergedRowColumnsWithOriginalFiles(startingRowId, bucket));
                 }
                 else {
+                    log.info("Adding adaptation for non-original file");
                     columnAdaptations.add(mergedRowColumns());
                 }
             }

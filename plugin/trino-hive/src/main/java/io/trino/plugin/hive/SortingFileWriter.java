@@ -29,6 +29,7 @@ import io.trino.plugin.hive.util.TempFileWriter;
 import io.trino.spi.Page;
 import io.trino.spi.PageSorter;
 import io.trino.spi.TrinoException;
+import io.trino.spi.block.PageDescriptionUtils;
 import io.trino.spi.connector.SortOrder;
 import io.trino.spi.type.Type;
 import io.trino.spi.type.TypeOperators;
@@ -119,6 +120,7 @@ public class SortingFileWriter
     @Override
     public void appendRows(Page page)
     {
+        log.info("appendRows input %s", PageDescriptionUtils.describePage(page));
         if (!sortBuffer.canAdd(page)) {
             flushToTempFile();
         }

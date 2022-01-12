@@ -13,8 +13,10 @@
  */
 package io.trino.operator;
 
+import io.airlift.log.Logger;
 import io.trino.Session;
 import io.trino.spi.Page;
+import io.trino.spi.block.PageDescriptionUtils;
 import io.trino.spi.connector.ConnectorMergeSink;
 import io.trino.split.PageSinkManager;
 import io.trino.sql.planner.plan.PlanNodeId;
@@ -27,6 +29,8 @@ import static java.util.Objects.requireNonNull;
 public class MergeWriterOperator
         extends AbstractRowChangeOperator
 {
+    private static final Logger log = Logger.get(MergeWriterOperator.class);
+
     public static class MergeWriterOperatorFactory
             implements OperatorFactory
     {
@@ -79,6 +83,7 @@ public class MergeWriterOperator
     @Override
     public void addInput(Page page)
     {
+        log.info("In addInput, page %s", PageDescriptionUtils.describePage(page));
         requireNonNull(page, "page is null");
         checkState(state == State.RUNNING, "Operator is %s", state);
 
