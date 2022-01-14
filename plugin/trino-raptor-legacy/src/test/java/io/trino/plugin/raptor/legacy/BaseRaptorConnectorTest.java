@@ -907,4 +907,33 @@ public abstract class BaseRaptorConnectorTest
                                 "|.*Unique index or primary key violation.*" +
                                 "|.*Deadlock found when trying to get lock; try restarting transaction.*");
     }
+
+    @Test(invocationCount = 10)
+    public void testMerge()
+    {
+        String tableName = "test_merge_" + randomTableSuffix();
+        assertUpdate("CREATE TABLE " + tableName + " AS SELECT * FROM tpch.sf1.orders", 1_500_000);
+
+        @Language("SQL") String mergeSql = "" +
+                "MERGE INTO " + tableName + " t USING (SELECT * FROM tpch.sf1.orders) s ON (t.orderkey = s.orderkey)\n" +
+                "WHEN MATCHED AND mod(s.orderkey, 3) = 0 THEN UPDATE SET totalprice = t.totalprice + s.totalprice\n" +
+                "WHEN MATCHED AND mod(s.orderkey, 3) = 1 THEN DELETE";
+
+//        log.info("Explain plan\n%s\n%s", mergeSql, computeActual("EXPLAIN " + mergeSql).getOnlyValue());
+//        assertUpdate(mergeSql, 1_499_988);
+//        assertUpdate(mergeSql, 1_500_027);
+//        assertUpdate(mergeSql, 0);
+        MaterializedResult result = computeActual(mergeSql);
+        System.out.println("UPDATE COUNT: " + result.getUpdateCount());
+
+        assertEquals(
+                computeActual("SELECT count(*), cast(sum(totalprice) AS decimal(18,2)) FROM " + tableName + " WHERE mod(orderkey, 3) = 0"),
+                computeActual("SELECT count(*), cast(sum(totalprice * 2) AS decimal(18,2)) FROM tpch.sf1.orders WHERE mod(orderkey, 3) = 0"));
+
+        assertQuery("SELECT count(*) FROM " + tableName + " WHERE mod(orderkey, 3) = 1", "SELECT 0");
+
+        assertEquals(
+                computeActual("SELECT count(*), cast(sum(totalprice) AS decimal(18,2)) FROM " + tableName + " WHERE mod(orderkey, 3) = 2"),
+                computeActual("SELECT count(*), cast(sum(totalprice) AS decimal(18,2)) FROM tpch.sf1.orders WHERE mod(orderkey, 3) = 2"));
+    }
 }
