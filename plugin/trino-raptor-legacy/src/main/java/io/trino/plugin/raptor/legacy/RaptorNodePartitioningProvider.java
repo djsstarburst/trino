@@ -50,6 +50,10 @@ public class RaptorNodePartitioningProvider
     @Override
     public ConnectorBucketNodeMap getBucketNodeMap(ConnectorTransactionHandle transaction, ConnectorSession session, ConnectorPartitioningHandle partitioning)
     {
+        if (partitioning instanceof RaptorUnbucketedUpdateHandle) {
+            return createBucketNodeMap(nodeSupplier.getWorkerNodes().size());
+        }
+
         RaptorPartitioningHandle handle = (RaptorPartitioningHandle) partitioning;
 
         Map<String, Node> nodesById = uniqueIndex(nodeSupplier.getWorkerNodes(), Node::getNodeIdentifier);
@@ -74,6 +78,12 @@ public class RaptorNodePartitioningProvider
     @Override
     public BucketFunction getBucketFunction(ConnectorTransactionHandle transaction, ConnectorSession session, ConnectorPartitioningHandle partitioning, List<Type> partitionChannelTypes, int bucketCount)
     {
+        if (partitioning instanceof RaptorUnbucketedUpdateHandle) {
+            return new RaptorUnbucketedUpdateFunction();
+        }
+        if (partitioning instanceof RaptorBucketedUpdateHandle) {
+            return new RaptorBucketedUpdateFunction(bucketCount);
+        }
         return new RaptorBucketFunction(bucketCount, partitionChannelTypes);
     }
 }
