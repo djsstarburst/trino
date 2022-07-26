@@ -55,6 +55,10 @@ public abstract class BaseKuduConnectorSmokeTest
             case SUPPORTS_NEGATIVE_DATE:
                 return false;
 
+            case SUPPORTS_MERGE:
+                // FIXME:  Fails because the target table has no primary key
+                return false;
+
             case SUPPORTS_ROW_TYPE:
                 return false;
 

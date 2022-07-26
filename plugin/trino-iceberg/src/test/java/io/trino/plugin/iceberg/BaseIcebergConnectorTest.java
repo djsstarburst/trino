@@ -180,6 +180,7 @@ public abstract class BaseIcebergConnectorTest
 
             case SUPPORTS_DELETE:
             case SUPPORTS_UPDATE:
+            case SUPPORTS_MERGE:
                 return true;
 
             case SUPPORTS_COMMENT_ON_VIEW:
@@ -4959,35 +4960,6 @@ public abstract class BaseIcebergConnectorTest
         assertThat(query(format("SELECT * FROM %s", tableName)))
                 .matches("VALUES (INTEGER '1', CAST(ROW(11) AS ROW(\"another identifier\"INTEGER)))");
         assertUpdate("DROP TABLE " + tableName);
-    }
-
-    @Test
-    public void testMerge()
-    {
-        String tableName = "test_merge_" + randomTableSuffix();
-
-        long sourceRows = (long) computeActual("SELECT count(*) FROM tpch.sf1.orders").getOnlyValue();
-        assertUpdate(format("CREATE TABLE %s WITH (partitioning = ARRAY['bucket(orderkey, 9)']) AS SELECT * FROM %s", tableName, "tpch.sf1.orders"), sourceRows);
-
-        @Language("SQL") String mergeSql = "" +
-                "MERGE INTO " + tableName + " t USING (SELECT * FROM tpch.sf1.orders) s ON (t.orderkey = s.orderkey)\n" +
-                "WHEN MATCHED AND mod(s.orderkey, 3) = 0 THEN UPDATE SET totalprice = t.totalprice + s.totalprice\n" +
-                "WHEN MATCHED AND mod(s.orderkey, 3) = 1 THEN DELETE";
-
-        assertUpdate(mergeSql, 1_500_000);
-
-        // verify deleted rows
-        assertQuery("SELECT count(*) FROM " + tableName + " WHERE mod(orderkey, 3) = 1", "SELECT 0");
-
-        // verify untouched rows
-        assertEquals(
-                computeActual("SELECT count(*), cast(sum(totalprice) AS decimal(18,2)) FROM " + tableName + " WHERE mod(orderkey, 3) = 2"),
-                computeActual("SELECT count(*), cast(sum(totalprice) AS decimal(18,2)) FROM tpch.sf1.orders WHERE mod(orderkey, 3) = 2"));
-
-        // verify updated rows
-        assertEquals(
-                computeActual("SELECT count(*), cast(sum(totalprice) AS decimal(18,2)) FROM " + tableName + " WHERE mod(orderkey, 3) = 0"),
-                computeActual("SELECT count(*), cast(sum(totalprice * 2) AS decimal(18,2)) FROM tpch.sf1.orders WHERE mod(orderkey, 3) = 0"));
     }
 
     @Override

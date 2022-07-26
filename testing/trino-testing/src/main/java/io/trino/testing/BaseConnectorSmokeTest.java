@@ -29,6 +29,7 @@ import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_CREATE_TABLE_WI
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_CREATE_VIEW;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_DELETE;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_INSERT;
+import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_MERGE;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_RENAME_SCHEMA;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_RENAME_TABLE;
 import static io.trino.testing.TestingConnectorBehavior.SUPPORTS_RENAME_TABLE_ACROSS_SCHEMAS;
@@ -247,6 +248,28 @@ public abstract class BaseConnectorSmokeTest
             assertThat(query("SELECT * FROM " + tableName))
                     .skippingTypesCheck()
                     .matches("SELECT IF(regionkey=2, nationkey + 100, nationkey) nationkey, name, regionkey, comment FROM tpch.tiny.nation");
+        }
+    }
+
+    @Test
+    public void testMerge()
+    {
+        String mergeSql = "MERGE INTO %s n" +
+                " USING (SELECT * FROM (VALUES(12))) AS s(otherkey)" +
+                " ON (n.nationkey = s.otherkey)" +
+                " WHEN MATCHED THEN UPDATE SET nationkey = nationkey + s.otherkey";
+        if (!hasBehavior(SUPPORTS_MERGE)) {
+            // Note this change is a no-op, if actually run
+            assertQueryFails(format(mergeSql, "nation"), "This connector does not support merges");
+            return;
+        }
+
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_merge", "AS TABLE tpch.tiny.nation")) {
+            String tableName = table.getName();
+            assertUpdate(format(mergeSql, tableName), 1);
+            assertThat(query("SELECT cast(nationkey AS integer) FROM " + tableName + " WHERE name = 'JAPAN'"))
+                    .skippingTypesCheck()
+                    .matches("VALUES 24");
         }
     }
 

@@ -15,6 +15,7 @@ package io.trino.plugin.kudu;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.google.common.collect.ImmutableList;
 import io.trino.spi.connector.ConnectorMergeTableHandle;
 import io.trino.spi.type.Type;
 
@@ -59,7 +60,15 @@ public class KuduMergeTableHandle
     @Override
     public List<Type> getColumnTypes()
     {
-        return outputTableHandle.getColumnTypes();
+        List<Type> types = outputTableHandle.getColumnTypes();
+        if (!outputTableHandle.isGenerateUUID()) {
+            return types;
+        }
+        // If we're generating UUIDs, MERGE will put the UUID column first.  So put it first in the list of types
+        return ImmutableList.<Type>builder()
+                .addAll(types.subList(1, types.size()))
+                .add(types.get(0))
+                .build();
     }
 
     @Override
