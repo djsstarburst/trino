@@ -16,6 +16,7 @@ package io.trino.plugin.iceberg;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
+import io.airlift.log.Logger;
 import io.airlift.units.DataSize;
 import io.trino.Session;
 import io.trino.hdfs.HdfsContext;
@@ -134,6 +135,7 @@ import static org.testng.Assert.assertTrue;
 public abstract class BaseIcebergConnectorTest
         extends BaseConnectorTest
 {
+    private static final Logger log = Logger.get(BaseIcebergConnectorTest.class);
     private static final Pattern WITH_CLAUSE_EXTRACTOR = Pattern.compile(".*(WITH\\s*\\([^)]*\\))\\s*$", Pattern.DOTALL);
 
     private final IcebergFileFormat format;
@@ -4787,6 +4789,40 @@ public abstract class BaseIcebergConnectorTest
     }
 
     @Test
+    public void testDeletePlan()
+    {
+        // delete successive parts of the table
+        String tableName = "test_delete_returns_number_of_rows_" + randomTableSuffix();
+        assertUpdate("CREATE TABLE " + tableName + " (key varchar, value integer) WITH (partitioning = ARRAY['key'])");
+        assertUpdate("INSERT INTO " + tableName + " VALUES ('one', 1)", 1);
+        assertUpdate("INSERT INTO " + tableName + " VALUES ('one', 2)", 1);
+        assertUpdate("INSERT INTO " + tableName + " VALUES ('one', 3)", 1);
+        assertUpdate("INSERT INTO " + tableName + " VALUES ('two', 1)", 1);
+        assertUpdate("INSERT INTO " + tableName + " VALUES ('two', 2)", 1);
+
+        String mergeSql = "MERGE INTO " + tableName + " t USING (SELECT * FROM " + tableName + ") s ON (t.key = s.key AND t.value = s.value)\n" +
+                "    WHEN MATCHED AND t.key = 'one' THEN DELETE";
+        log.info("MERGE plan: %s", computeActual("EXPLAIN " + mergeSql).getOnlyValue());
+        String deleteSql = "DELETE FROM " + tableName + " WHERE key = 'one'";
+        log.info("DELETE plan: %s", computeActual("EXPLAIN " + deleteSql).getOnlyValue());
+
+        assertUpdate(deleteSql, 3);
+        assertQuery("SELECT COUNT(*) FROM " + tableName + " WHERE key = 'one'", "VALUES (0)");
+        assertQuery("SELECT COUNT(*) FROM " + tableName + " WHERE key = 'two'", "VALUES (2)");
+
+        assertUpdate("DROP TABLE " + tableName);
+    }
+
+    @Test
+    public void testDeleteWithFalsePredicate()
+    {
+        // delete successive parts of the table
+        try (TestTable table = new TestTable(getQueryRunner()::execute, "test_delete_", "AS SELECT * FROM orders")) {
+            assertUpdate("DELETE FROM " + table.getName() + " WHERE custkey < 100 AND custkey > 101", "SELECT 0");
+        }
+    }
+
+    @Test
     public void testExpireSnapshots()
             throws Exception
     {
@@ -5451,6 +5487,10 @@ public abstract class BaseIcebergConnectorTest
 
         assertUpdate(format("INSERT INTO %s (customer, purchases, address) VALUES ('Aaron', 5, 'Antioch'), ('Bill', 7, 'Buena'), ('Carol', 3, 'Cambridge'), ('Dave', 11, 'Devon')", targetTable), 4);
 
+        String deleteSql = "EXPLAIN DELETE FROM " + targetTable + " WHERE length(customer) > 4";
+
+        log.info("DELETE plan: %s", computeActual(deleteSql).getOnlyValue());
+
         assertUpdate(format("CREATE TABLE %s (customer VARCHAR, purchases INT, address VARCHAR)", sourceTable));
 
         assertUpdate(format("INSERT INTO %s (customer, purchases, address) VALUES ('Aaron', 6, 'Arches'), ('Ed', 7, 'Etherville'), ('Carol', 9, 'Centreville'), ('Dave', 11, 'Darbyshire')", sourceTable), 4);
@@ -5459,6 +5499,9 @@ public abstract class BaseIcebergConnectorTest
                 "    WHEN MATCHED AND s.address = 'Centreville' THEN DELETE" +
                 "    WHEN MATCHED THEN UPDATE SET purchases = s.purchases + t.purchases, address = s.address" +
                 "    WHEN NOT MATCHED THEN INSERT (customer, purchases, address) VALUES(s.customer, s.purchases, s.address)";
+
+        log.info("MERGE plan: %s", computeActual("EXPLAIN " + format("MERGE INTO %s t USING %s s ON (t.customer = s.customer)", targetTable, sourceTable) +
+                        "    WHEN MATCHED AND length(t.customer) > 4 THEN DELETE").getOnlyValue());
 
         assertUpdate(sql, 4);
 

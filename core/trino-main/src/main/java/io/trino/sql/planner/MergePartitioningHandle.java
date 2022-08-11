@@ -36,6 +36,7 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.collect.Iterables.getLast;
 import static io.trino.spi.StandardErrorCode.NOT_SUPPORTED;
 import static io.trino.spi.connector.ConnectorMergeSink.DELETE_OPERATION_NUMBER;
+import static io.trino.spi.connector.ConnectorMergeSink.IGNORED_OPERATION_NUMBER;
 import static io.trino.spi.connector.ConnectorMergeSink.INSERT_OPERATION_NUMBER;
 import static io.trino.spi.connector.ConnectorMergeSink.UPDATE_OPERATION_NUMBER;
 import static io.trino.spi.type.TinyintType.TINYINT;
@@ -177,6 +178,7 @@ public final class MergePartitioningHandle
                     return insertFunction.getPartition(page.getColumns(insertColumns), position);
                 case UPDATE_OPERATION_NUMBER:
                 case DELETE_OPERATION_NUMBER:
+                case IGNORED_OPERATION_NUMBER:
                     return updateFunction.getPartition(page.getColumns(updateColumns), position);
                 default:
                     throw new VerifyException("Invalid merge operation number: " + operation);

@@ -60,6 +60,11 @@ public final class Patterns
         return typeOf(DeleteNode.class);
     }
 
+    public static Pattern<MergeWriterNode> mergeWriter()
+    {
+        return typeOf(MergeWriterNode.class);
+    }
+
     public static Pattern<UpdateNode> update()
     {
         return typeOf(UpdateNode.class);

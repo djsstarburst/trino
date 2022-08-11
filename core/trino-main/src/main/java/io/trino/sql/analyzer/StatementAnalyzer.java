@@ -786,7 +786,74 @@ class StatementAnalyzer
             analysis.setUpdateTarget(tableName, Optional.of(table), Optional.empty());
             analyzeFiltersAndMasks(table, tableName, Optional.of(handle), analysis.getScope(table).getRelationType(), session.getIdentity().getUser());
 
+            createMergeAnalysis(table, handle, tableSchema, tableScope, tableScope, ImmutableList.of());
+
             return createAndAssignScope(node, scope, Field.newUnqualified("rows", BIGINT));
+        }
+
+        private void createMergeAnalysis(Table table, TableHandle handle, TableSchema tableSchema, Scope tableScope, Scope joinScope, List<List<ColumnHandle>> updatedColumns)
+        {
+            Optional<PartitioningHandle> updateLayout = metadata.getUpdateLayout(session, handle);
+            Map<String, ColumnHandle> allColumnHandles = metadata.getColumnHandles(session, handle);
+            ImmutableMap.Builder<ColumnHandle, Integer> columnHandleFieldNumbersBuilder = ImmutableMap.builder();
+            Map<String, Integer> fieldIndexes = new HashMap<>();
+            RelationType relationType = tableScope.getRelationType();
+            for (Field field : relationType.getAllFields()) {
+                // Only the rowId column handle will have no name, and we want to skip that column
+                field.getName().ifPresent(name -> {
+                    int fieldIndex = relationType.indexOf(field);
+                    ColumnHandle columnHandle = allColumnHandles.get(name);
+                    verify(handle != null, "allColumnHandles does not contain the named handle: %s", name);
+                    columnHandleFieldNumbersBuilder.put(columnHandle, fieldIndex);
+                    fieldIndexes.put(name, fieldIndex);
+                });
+            }
+            Map<ColumnHandle, Integer> columnHandleFieldNumbers = columnHandleFieldNumbersBuilder.buildOrThrow();
+
+            List<ColumnSchema> dataColumnSchemas = tableSchema.getColumns().stream()
+                    .filter(column -> !column.isHidden())
+                    .collect(toImmutableList());
+            Optional<TableLayout> insertLayout = metadata.getInsertLayout(session, handle);
+
+            ImmutableList.Builder<ColumnHandle> dataColumnHandlesBuilder = ImmutableList.builder();
+            ImmutableSet.Builder<String> dataColumnNamesBuilder = ImmutableSet.builder();
+            ImmutableList.Builder<ColumnHandle> redistributionColumnHandlesBuilder = ImmutableList.builder();
+            Set<String> partitioningColumnNames = ImmutableSet.copyOf(insertLayout.map(TableLayout::getPartitionColumns).orElse(ImmutableList.of()));
+            for (ColumnSchema columnSchema : dataColumnSchemas) {
+                String name = columnSchema.getName();
+                ColumnHandle columnHandle = allColumnHandles.get(name);
+                dataColumnNamesBuilder.add(name);
+                dataColumnHandlesBuilder.add(columnHandle);
+                if (partitioningColumnNames.contains(name)) {
+                    redistributionColumnHandlesBuilder.add(columnHandle);
+                }
+            }
+            List<ColumnHandle> dataColumnHandles = dataColumnHandlesBuilder.build();
+            List<ColumnHandle> redistributionColumnHandles = redistributionColumnHandlesBuilder.build();
+
+            List<Integer> insertPartitioningArgumentIndexes = partitioningColumnNames.stream()
+                    .map(fieldIndexes::get)
+                    .collect(toImmutableList());
+
+            Set<ColumnHandle> nonNullableColumnHandles = metadata.getTableMetadata(session, handle).getColumns().stream()
+                    .filter(column -> !column.isNullable())
+                    .map(ColumnMetadata::getName)
+                    .map(allColumnHandles::get)
+                    .collect(toImmutableSet());
+
+            analysis.setMergeAnalysis(new MergeAnalysis(
+                    table,
+                    dataColumnSchemas,
+                    dataColumnHandles,
+                    redistributionColumnHandles,
+                    updatedColumns,
+                    nonNullableColumnHandles,
+                    columnHandleFieldNumbers,
+                    insertPartitioningArgumentIndexes,
+                    insertLayout,
+                    updateLayout,
+                    tableScope,
+                    joinScope));
         }
 
         @Override
@@ -1844,9 +1911,6 @@ class StatementAnalyzer
                 // Add the row id field
                 ColumnHandle rowIdColumnHandle;
                 switch (updateKind.get()) {
-                    case DELETE:
-                        rowIdColumnHandle = metadata.getDeleteRowIdColumnHandle(session, tableHandle.get());
-                        break;
                     case UPDATE:
                         List<ColumnSchema> updatedColumnMetadata = analysis.getUpdatedColumns()
                                 .orElseThrow(() -> new VerifyException("updated columns not set"));
@@ -1859,6 +1923,7 @@ class StatementAnalyzer
                                 .collect(toImmutableList());
                         rowIdColumnHandle = metadata.getUpdateRowIdColumnHandle(session, tableHandle.get(), updatedColumns);
                         break;
+                    case DELETE:
                     case MERGE:
                         rowIdColumnHandle = metadata.getMergeRowIdColumnHandle(session, tableHandle.get());
                         break;
@@ -2754,10 +2819,14 @@ class StatementAnalyzer
                 }
             }
 
-            List<ColumnSchema> updatedColumns = allColumns.stream()
+            List<ColumnSchema> updatedColumnSchemas = allColumns.stream()
                     .filter(column -> assignmentTargets.contains(column.getName()))
                     .collect(toImmutableList());
-            analysis.setUpdatedColumns(updatedColumns);
+            analysis.setUpdatedColumns(updatedColumnSchemas);
+            Map<String, ColumnHandle> allColumnHandles = metadata.getColumnHandles(session, handle);
+            List<ColumnHandle> updatedColumnHandles = updatedColumnSchemas.stream()
+                    .map(allColumnHandles::get)
+                    .collect(toImmutableList());
 
             // Analyzer checks for select permissions but UPDATE has a separate permission, so disable access checks
             StatementAnalyzer analyzer = statementAnalyzerFactory
@@ -2805,9 +2874,11 @@ class StatementAnalyzer
             analysis.setUpdateTarget(
                     tableName,
                     Optional.of(table),
-                    Optional.of(updatedColumns.stream()
+                    Optional.of(updatedColumnSchemas.stream()
                             .map(column -> new OutputColumn(new Column(column.getName(), column.getType().toString()), ImmutableSet.of()))
                             .collect(toImmutableList())));
+
+            createMergeAnalysis(table, handle, tableSchema, tableScope, tableScope, ImmutableList.of(updatedColumnHandles));
 
             return createAndAssignScope(update, scope, Field.newUnqualified("rows", BIGINT));
         }
@@ -2873,25 +2944,13 @@ class StatementAnalyzer
 
             Optional<TableLayout> insertLayout = metadata.getInsertLayout(session, targetTableHandle);
 
-            Map<String, ColumnHandle> allColumnHandles = metadata.getColumnHandles(session, targetTableHandle);
-            ImmutableList.Builder<ColumnHandle> dataColumnHandlesBuilder = ImmutableList.builder();
-            ImmutableSet.Builder<String> dataColumnNamesBuilder = ImmutableSet.builder();
-            ImmutableList.Builder<ColumnHandle> redistributionColumnHandlesBuilder = ImmutableList.builder();
-            Set<String> partitioningColumnNames = ImmutableSet.copyOf(insertLayout.map(TableLayout::getPartitionColumns).orElse(ImmutableList.of()));
-            for (ColumnSchema columnSchema : dataColumnSchemas) {
-                String name = columnSchema.getName();
-                ColumnHandle handle = allColumnHandles.get(name);
-                dataColumnNamesBuilder.add(name);
-                dataColumnHandlesBuilder.add(handle);
-                if (partitioningColumnNames.contains(name)) {
-                    redistributionColumnHandlesBuilder.add(handle);
-                }
-            }
-            List<ColumnHandle> dataColumnHandles = dataColumnHandlesBuilder.build();
-            Set<String> dataColumnNames = dataColumnNamesBuilder.build();
-            List<ColumnHandle> redistributionColumnHandles = redistributionColumnHandlesBuilder.build();
-
             Map<String, Type> dataColumnTypes = dataColumnSchemas.stream().collect(toImmutableMap(ColumnSchema::getName, ColumnSchema::getType));
+            Set<String> dataColumnNames = dataColumnSchemas.stream().map(ColumnSchema::getName).collect(toImmutableSet());
+
+            Map<String, ColumnHandle> allColumnHandles = metadata.getColumnHandles(session, targetTableHandle);
+            List<List<ColumnHandle>> mergeCaseColumnHandles = buildCaseColumnLists(merge, dataColumnSchemas, allColumnHandles);
+
+            createMergeAnalysis(table, targetTableHandle, tableSchema, targetTableScope, joinScope, mergeCaseColumnHandles);
 
             // Analyze all expressions in the Merge node
 
@@ -2980,48 +3039,10 @@ class StatementAnalyzer
 
             analysis.setUpdateType("MERGE");
             analysis.setUpdateTarget(tableName, Optional.of(table), Optional.of(updatedColumns));
-            List<List<ColumnHandle>> mergeCaseColumnHandles = buildCaseColumnLists(merge, dataColumnSchemas, allColumnHandles);
 
             Optional<PartitioningHandle> updateLayout = metadata.getUpdateLayout(session, targetTableHandle);
 
-            ImmutableMap.Builder<ColumnHandle, Integer> columnHandleFieldNumbersBuilder = ImmutableMap.builder();
-            Map<String, Integer> fieldIndexes = new HashMap<>();
-            RelationType relationType = targetTableScope.getRelationType();
-            for (Field field : relationType.getAllFields()) {
-                // Only the rowId column handle will have no name, and we want to skip that column
-                field.getName().ifPresent(name -> {
-                    int fieldIndex = relationType.indexOf(field);
-                    ColumnHandle handle = allColumnHandles.get(name);
-                    verify(handle != null, "allColumnHandles does not contain the named handle: %s", name);
-                    columnHandleFieldNumbersBuilder.put(handle, fieldIndex);
-                    fieldIndexes.put(name, fieldIndex);
-                });
-            }
-            Map<ColumnHandle, Integer> columnHandleFieldNumbers = columnHandleFieldNumbersBuilder.buildOrThrow();
-
-            List<Integer> insertPartitioningArgumentIndexes = partitioningColumnNames.stream()
-                    .map(fieldIndexes::get)
-                    .collect(toImmutableList());
-
-            Set<ColumnHandle> nonNullableColumnHandles = metadata.getTableMetadata(session, targetTableHandle).getColumns().stream()
-                    .filter(column -> !column.isNullable())
-                    .map(ColumnMetadata::getName)
-                    .map(allColumnHandles::get)
-                    .collect(toImmutableSet());
-
-            analysis.setMergeAnalysis(new MergeAnalysis(
-                    table,
-                    dataColumnSchemas,
-                    dataColumnHandles,
-                    redistributionColumnHandles,
-                    mergeCaseColumnHandles,
-                    nonNullableColumnHandles,
-                    columnHandleFieldNumbers,
-                    insertPartitioningArgumentIndexes,
-                    insertLayout,
-                    updateLayout,
-                    targetTableScope,
-                    joinScope));
+            createMergeAnalysis(table, targetTableHandle, tableSchema, targetTableScope, joinScope, mergeCaseColumnHandles);
 
             return createAndAssignScope(merge, Optional.empty(), Field.newUnqualified("rows", BIGINT));
         }
